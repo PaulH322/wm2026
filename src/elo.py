@@ -37,6 +37,7 @@ def main() -> None:
     def get_elo(team: str) -> float:
         return elo.setdefault(team, STARTING_ELO)
 
+    history = []
     for row in matches.itertuples():
         home_elo, away_elo = get_elo(row.home_team), get_elo(row.away_team)
         k = K_GROUP_STAGE if row.stage == "GROUP_STAGE" else K_KNOCKOUT
@@ -47,8 +48,31 @@ def main() -> None:
         home_expected = expected_score(home_elo, away_elo)
         away_expected = 1 - home_expected
 
-        elo[row.home_team] = home_elo + k * (home_actual - home_expected)
-        elo[row.away_team] = away_elo + k * (away_actual - away_expected)
+        home_elo_post = home_elo + k * (home_actual - home_expected)
+        away_elo_post = away_elo + k * (away_actual - away_expected)
+        elo[row.home_team] = home_elo_post
+        elo[row.away_team] = away_elo_post
+
+        favorite = "HOME_TEAM" if home_elo > away_elo else "AWAY_TEAM"
+        upset = row.winner not in (favorite, "DRAW") and home_elo != away_elo
+
+        history.append(
+            {
+                "match_id": row.match_id,
+                "date": row.date,
+                "stage": row.stage,
+                "home_team": row.home_team,
+                "away_team": row.away_team,
+                "home_score": row.home_score,
+                "away_score": row.away_score,
+                "winner": row.winner,
+                "home_elo_pre": round(home_elo, 1),
+                "away_elo_pre": round(away_elo, 1),
+                "home_elo_post": round(home_elo_post, 1),
+                "away_elo_post": round(away_elo_post, 1),
+                "upset": upset,
+            }
+        )
 
     ratings = (
         pd.DataFrame(sorted(elo.items(), key=lambda x: -x[1]), columns=["team", "elo"])
@@ -58,6 +82,10 @@ def main() -> None:
     out_path = PROCESSED_DIR / "elo_ratings.csv"
     ratings.to_csv(out_path, index=False)
     print(f"Saved {len(ratings)} team ratings -> {out_path}")
+
+    history_path = PROCESSED_DIR / "elo_history.csv"
+    pd.DataFrame(history).to_csv(history_path, index=False)
+    print(f"Saved {len(history)} match Elo snapshots -> {history_path}")
 
 
 if __name__ == "__main__":

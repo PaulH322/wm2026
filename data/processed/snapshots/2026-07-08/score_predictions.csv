@@ -1,0 +1,13 @@
+match_id,home_team,away_team,rank,home_goals,away_goals,probability
+537383,France,Morocco,1,2,1,0.0993
+537383,France,Morocco,2,1,1,0.0981
+537383,France,Morocco,3,2,0,0.0923
+537384,Spain,Belgium,1,1,0,0.1839
+537384,Spain,Belgium,2,0,0,0.1438
+537384,Spain,Belgium,3,1,1,0.1214
+537385,Norway,England,1,1,2,0.0867
+537385,Norway,England,2,1,1,0.0781
+537385,Norway,England,3,2,2,0.0691
+537386,Argentina,Switzerland,1,2,1,0.0841
+537386,Argentina,Switzerland,2,1,1,0.083
+537386,Argentina,Switzerland,3,2,2,0.0714
