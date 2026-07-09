@@ -2,12 +2,19 @@
 
 football-data.org gives each match's stage and (once decided) its two
 participants, but never the bracket linkage itself - which match feeds
-which. For rounds that are already decided this module derives that
-linkage factually (by finding which earlier match each participant
-actually won); for rounds that aren't decided yet there is nothing factual
-to derive, so callers that need to project forward pair up consecutive
-entries of the previous round (standard bracket convention: winner of
-match 1 vs winner of match 2, match 3 vs match 4, ...).
+which. This module derives that linkage by building the tree backward from
+the final: for an already-decided match its two feeders are found factually
+(whichever earlier match each participant actually won); for a match not
+decided yet there is nothing factual to derive, so its two feeders are
+picked from the remaining fixtures of the earlier round in chronological
+order (the standard adjacent-pairing bracket convention).
+
+Building it this way (root-down, not leaf-up) matters: sorting the leaf
+round by date and hoping adjacent matches pair up does NOT generally
+reproduce the real bracket - the real draw has no relation to fixture
+scheduling order. Working backward from a match whose participants are
+known and matching by team identity is the only way to get the true
+pairing for decided rounds.
 """
 import json
 from pathlib import Path
@@ -34,35 +41,69 @@ def load_matches_by_stage() -> dict[str, list[dict]]:
     return by_stage
 
 
+def _team_names(m: dict) -> set[str]:
+    return {n for n in ((m["homeTeam"] or {}).get("name"), (m["awayTeam"] or {}).get("name")) if n}
+
+
+def _build_node(matches_by_stage: dict[str, list[dict]], stage_idx: int, match: dict, used: dict[str, set]) -> dict:
+    stage = MAIN_BRACKET_STAGES[stage_idx]
+    used[stage].add(match["id"])
+    node = {"stage": stage, "match": match, "children": None}
+
+    if stage_idx == 0:
+        return node
+
+    prev_stage = MAIN_BRACKET_STAGES[stage_idx - 1]
+    prev_available = [m for m in matches_by_stage.get(prev_stage, []) if m["id"] not in used[prev_stage]]
+
+    home = (match["homeTeam"] or {}).get("name")
+    away = (match["awayTeam"] or {}).get("name")
+
+    feeder_a = feeder_b = None
+    if home and away:
+        feeder_a = next((m for m in prev_available if home in _team_names(m)), None)
+        feeder_b = next(
+            (m for m in prev_available if away in _team_names(m) and m is not feeder_a), None
+        )
+
+    if feeder_a is None or feeder_b is None:
+        fallback = sorted(prev_available, key=lambda m: (m["utcDate"], m["id"]))
+        feeder_a, feeder_b = fallback[0], fallback[1]
+
+    left = _build_node(matches_by_stage, stage_idx - 1, feeder_a, used)
+    right = _build_node(matches_by_stage, stage_idx - 1, feeder_b, used)
+    node["children"] = (left, right)
+    return node
+
+
+def build_bracket_tree(matches_by_stage: dict[str, list[dict]]) -> dict | None:
+    final_matches = matches_by_stage.get(MAIN_BRACKET_STAGES[-1], [])
+    if not final_matches:
+        return None
+    root_match = sorted(final_matches, key=lambda m: (m["utcDate"], m["id"]))[0]
+    used: dict[str, set] = {stage: set() for stage in MAIN_BRACKET_STAGES}
+    return _build_node(matches_by_stage, len(MAIN_BRACKET_STAGES) - 1, root_match, used)
+
+
+def flatten_tree(root: dict | None) -> dict[str, list[dict]]:
+    """Depth-first flatten (children before the match they feed) so each
+    stage's list keeps the strict pairing: match i's two participants came
+    from matches 2i and 2i+1 of the previous stage's list."""
+    result: dict[str, list[dict]] = {stage: [] for stage in MAIN_BRACKET_STAGES}
+    if root is None:
+        return result
+
+    def walk(node: dict) -> None:
+        if node["children"]:
+            walk(node["children"][0])
+            walk(node["children"][1])
+        result[node["stage"]].append(node["match"])
+
+    walk(root)
+    return result
+
+
 def order_rounds(matches_by_stage: dict[str, list[dict]]) -> dict[str, list[dict]]:
-    """Order each round top-to-bottom so it lines up with the round before
-    it. For rounds whose participants are already decided, the order is
-    derived factually (which earlier match each team actually won); for
-    rounds not yet decided it falls back to chronological order."""
-    ordered: dict[str, list[dict]] = {}
-    prev_index: dict[str, int] | None = None
-
-    for stage in MAIN_BRACKET_STAGES:
-        stage_matches = matches_by_stage.get(stage, [])
-        if not stage_matches:
-            continue
-
-        if prev_index is None:
-            stage_matches = sorted(stage_matches, key=lambda m: (m["utcDate"], m["id"]))
-        else:
-            def sort_key(m):
-                teams = [(m["homeTeam"] or {}).get("name"), (m["awayTeam"] or {}).get("name")]
-                indices = [prev_index[t] for t in teams if t and t in prev_index]
-                return (min(indices) if indices else 999, m["utcDate"], m["id"])
-
-            stage_matches = sorted(stage_matches, key=sort_key)
-
-        ordered[stage] = stage_matches
-        prev_index = {}
-        for idx, m in enumerate(stage_matches):
-            for side in ("homeTeam", "awayTeam"):
-                name = (m[side] or {}).get("name")
-                if name:
-                    prev_index[name] = idx
-
-    return ordered
+    """Each stage's matches in strict-pairing order (see module docstring)."""
+    ordered = flatten_tree(build_bracket_tree(matches_by_stage))
+    return {stage: matches for stage, matches in ordered.items() if matches}

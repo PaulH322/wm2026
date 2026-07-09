@@ -45,17 +45,58 @@ BRACKET_CSS = """
     --muted: #898781;
   }
 }
-.bracket { display: flex; gap: 20px; align-items: stretch; min-width: max-content; }
-.bracket-round { display: flex; flex-direction: column; width: 220px; }
-.bracket-round-title {
+.bracket-header-row { display: flex; gap: 20px; margin-bottom: 8px; }
+.bracket-header-label {
+  width: 230px; flex: 0 0 auto;
   font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em;
-  color: var(--muted); text-align: center; margin-bottom: 8px; flex: 0 0 auto;
+  color: var(--muted); text-align: center;
 }
-.bracket-round-body {
-  display: flex; flex-direction: column; justify-content: space-evenly;
-  gap: 10px; flex: 1 1 auto;
+.bracket-tree { display: flex; }
+.bracket-branch { display: flex; flex-direction: row; align-items: center; position: relative; }
+.bracket-branch-children {
+  display: flex; flex-direction: column; justify-content: space-between;
+  gap: 10px; margin-right: 20px;
+  /* connector line only across the middle - not the full height of the
+     (possibly deeply nested) subtree - so it stops close to each child's
+     own center instead of overshooting past it. The trim converges to 25%
+     for large (deep) subtrees, but for two bare leaf cards the 10px gap is
+     not negligible relative to card height, so that level needs its own,
+     smaller trim (see the :has() rule below) or the line stops short of
+     the stub. */
+  background-image: linear-gradient(
+    to bottom,
+    transparent 0%, transparent 24.5%,
+    var(--border) 24.5%, var(--border) 75.5%,
+    transparent 75.5%, transparent 100%
+  );
+  background-size: 2px 100%;
+  background-repeat: no-repeat;
+  background-position: right top;
+}
+.bracket-branch-children:has(> .bracket-match) {
+  background-image: linear-gradient(
+    to bottom,
+    transparent 0%, transparent 23%,
+    var(--border) 23%, var(--border) 77%,
+    transparent 77%, transparent 100%
+  );
+}
+.bracket-branch-children > .bracket-branch,
+.bracket-branch-children > .bracket-match {
+  position: relative;
+}
+.bracket-branch-children > .bracket-branch::after,
+.bracket-branch-children > .bracket-match::after {
+  content: ""; position: absolute; top: 50%; right: -20px; width: 20px;
+  border-top: 2px solid var(--border);
+}
+.bracket-branch > .bracket-match { position: relative; }
+.bracket-branch > .bracket-match::before {
+  content: ""; position: absolute; top: 50%; left: -20px; width: 20px;
+  border-top: 2px solid var(--border);
 }
 .bracket-match {
+  width: 230px; min-height: 56px; box-sizing: border-box; flex: 0 0 auto;
   border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
   background: var(--surface); color: var(--text); font-size: 0.82rem;
 }
@@ -206,22 +247,57 @@ def render_slot_card(
     )
 
 
+def render_branch(
+    computed_rounds: dict,
+    stage_idx: int,
+    match_idx: int,
+    history_by_id: dict,
+    score_pred_by_id: dict,
+    goal_model: tuple,
+) -> str:
+    """Render a match and, recursively, the two earlier matches that feed it -
+    so the DOM nesting itself mirrors the bracket, and flexbox centering
+    (rather than fixed pixel math) keeps every connector line aligned even
+    though match cards vary in height."""
+    stage = MAIN_BRACKET_STAGES[stage_idx]
+    slot = computed_rounds[stage][match_idx]
+    card_html = render_slot_card(slot, history_by_id, score_pred_by_id, goal_model)
+
+    if stage_idx == 0:
+        return card_html
+
+    child_left = render_branch(
+        computed_rounds, stage_idx - 1, 2 * match_idx, history_by_id, score_pred_by_id, goal_model
+    )
+    child_right = render_branch(
+        computed_rounds, stage_idx - 1, 2 * match_idx + 1, history_by_id, score_pred_by_id, goal_model
+    )
+
+    return (
+        '<div class="bracket-branch">'
+        f'<div class="bracket-branch-children">{child_left}{child_right}</div>'
+        f"{card_html}"
+        "</div>"
+    )
+
+
 def build_bracket_html(
     computed_rounds: dict, history_by_id: dict, score_pred_by_id: dict, goal_model: tuple
 ) -> str:
-    columns = []
-    for stage in MAIN_BRACKET_STAGES:
-        slots = computed_rounds.get(stage)
-        if not slots:
-            continue
-        cards = "".join(
-            render_slot_card(s, history_by_id, score_pred_by_id, goal_model) for s in slots
-        )
-        columns.append(
-            f'<div class="bracket-round"><div class="bracket-round-title">{STAGE_LABELS[stage]}</div>'
-            f'<div class="bracket-round-body">{cards}</div></div>'
-        )
-    return BRACKET_CSS + f'<div class="bracket-wrap"><div class="bracket">{"".join(columns)}</div></div>'
+    final_idx = len(MAIN_BRACKET_STAGES) - 1
+    tree_html = render_branch(computed_rounds, final_idx, 0, history_by_id, score_pred_by_id, goal_model)
+
+    header = "".join(
+        f'<div class="bracket-header-label">{STAGE_LABELS[stage]}</div>' for stage in MAIN_BRACKET_STAGES
+    )
+
+    return (
+        BRACKET_CSS
+        + '<div class="bracket-wrap">'
+        + f'<div class="bracket-header-row">{header}</div>'
+        + f'<div class="bracket-tree">{tree_html}</div>'
+        + "</div>"
+    )
 
 
 st.set_page_config(page_title="Bracket-Simulator", layout="wide")
@@ -278,9 +354,9 @@ if third_place_slot:
     st.markdown(f"**{STAGE_LABELS['THIRD_PLACE']}**")
     st.markdown(
         BRACKET_CSS
-        + '<div class="bracket-wrap"><div class="bracket" style="min-width:220px;">'
+        + '<div class="bracket-wrap">'
         + render_slot_card(third_place_slot, history_by_id, score_pred_by_id, goal_model)
-        + "</div></div>",
+        + "</div>",
         unsafe_allow_html=True,
     )
 
