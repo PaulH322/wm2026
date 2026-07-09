@@ -10,7 +10,7 @@ und ein Poisson-Torergebnis-Modell, gefüttert mit echten Daten von
 
 ## Live-Demo
 
-_(folgt, sobald auf Streamlit Community Cloud deployed)_
+https://wm2026probabilty.streamlit.app/
 
 ## Features
 
