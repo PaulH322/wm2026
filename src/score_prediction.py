@@ -14,10 +14,10 @@ participants are still undetermined (future rounds depending on other
 results) are skipped.
 """
 import json
+import math
 from pathlib import Path
 
 import pandas as pd
-from scipy.stats import poisson
 
 RAW_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
 PROCESSED_DIR = Path(__file__).resolve().parent.parent / "data" / "processed"
@@ -78,6 +78,10 @@ def expected_goals(
     return avg_goals * attack.get(team, 1.0) * defense.get(opponent, 1.0)
 
 
+def poisson_pmf(k: int, lam: float) -> float:
+    return math.exp(-lam) * lam**k / math.factorial(k)
+
+
 def top_scorelines(
     home_team: str,
     away_team: str,
@@ -93,7 +97,7 @@ def top_scorelines(
         {
             "home_goals": h,
             "away_goals": a,
-            "probability": poisson.pmf(h, lambda_home) * poisson.pmf(a, lambda_away),
+            "probability": poisson_pmf(h, lambda_home) * poisson_pmf(a, lambda_away),
         }
         for h in range(MAX_GOALS + 1)
         for a in range(MAX_GOALS + 1)
